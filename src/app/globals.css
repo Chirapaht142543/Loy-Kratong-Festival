@@ -24,3 +24,118 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Grand Loy Krathong River Flow Keyframes */
+@keyframes riverFlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -400;
+  }
+}
+
+@keyframes riverFlowSlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -250;
+  }
+}
+
+@keyframes riverGlowPulse {
+  0%, 100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@keyframes ferrisRotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes skyLanternFloat {
+  0% {
+    transform: translateY(0px) translateX(0px);
+    opacity: 0.8;
+  }
+  50% {
+    transform: translateY(-24px) translateX(12px);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0px) translateX(0px);
+    opacity: 0.8;
+  }
+}
+
+@keyframes fireflyGlow {
+  0%, 100% {
+    opacity: 0.15;
+    transform: scale(0.8) translate(0px, 0px);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.3) translate(6px, -8px);
+  }
+}
+
+@keyframes candleFlicker {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  25% {
+    transform: scale(1.08) rotate(1deg);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.96) rotate(-1deg);
+    opacity: 0.85;
+  }
+  75% {
+    transform: scale(1.04) rotate(0.5deg);
+    opacity: 0.98;
+  }
+}
+
+.animate-river-current {
+  animation: riverFlow 12s linear infinite;
+}
+
+.animate-river-current-fast {
+  animation: riverFlow 7s linear infinite;
+}
+
+.animate-river-current-slow {
+  animation: riverFlowSlow 18s linear infinite;
+}
+
+.animate-river-glow {
+  animation: riverGlowPulse 4s ease-in-out infinite;
+}
+
+.animate-ferris-wheel {
+  animation: ferrisRotate 45s linear infinite;
+  transform-origin: center;
+}
+
+.animate-sky-lantern {
+  animation: skyLanternFloat 6s ease-in-out infinite;
+}
+
+.animate-firefly {
+  animation: fireflyGlow 3.5s ease-in-out infinite;
+}
+
+.animate-candle-flame {
+  animation: candleFlicker 1.8s ease-in-out infinite;
+}
