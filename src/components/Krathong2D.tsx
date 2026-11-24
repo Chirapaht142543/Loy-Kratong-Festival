@@ -17,7 +17,7 @@ interface Krathong2DProps {
   partnerName?: string;
 }
 
-export const Krathong2D: React.FC<Krathong2DProps> = ({
+export const Krathong2D: React.FC<Krathong2DProps> = React.memo(({
   design,
   size = 200,
   className = '',
@@ -216,7 +216,8 @@ export const Krathong2D: React.FC<Krathong2DProps> = ({
       )}
     </div>
   );
-};
+});
+Krathong2D.displayName = 'Krathong2D';
 
 // Single 2D Krathong Component
 const SingleKrathongSVG: React.FC<{

@@ -27,6 +27,7 @@ interface ResultCardModalProps {
   familyData?: FamilyProfile;
   matchResult?: MatchResult | null;
   onRestart: () => void;
+  onGoToRiver?: () => void;
 }
 
 export const ResultCardModal: React.FC<ResultCardModalProps> = ({
@@ -36,6 +37,7 @@ export const ResultCardModal: React.FC<ResultCardModalProps> = ({
   familyData,
   matchResult,
   onRestart,
+  onGoToRiver,
 }) => {
   const { toast } = useDialog();
   const [copied, setCopied] = useState(false);
@@ -459,7 +461,7 @@ export const ResultCardModal: React.FC<ResultCardModalProps> = ({
         <div className="space-y-2.5 pt-4 border-t border-slate-800">
           {/* Primary CTA: Jump to River Map */}
           <button
-            onClick={onRestart}
+            onClick={onGoToRiver || onRestart}
             className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-extrabold py-3.5 px-4 rounded-2xl text-sm sm:text-base shadow-xl transition transform hover:scale-102 active:scale-98"
           >
             <span>🌊</span>

@@ -10,7 +10,7 @@ interface AuthContextType {
   currentUser: UserProfile | null;
   isLoggedIn: boolean;
   isLoading: boolean;
-  login: (username: string) => boolean;
+  login: (identifier: string) => Promise<boolean>;
   register: (profileData: Omit<UserProfile, 'id' | 'createdAt'>) => UserProfile;
   updateProfile: (updates: Partial<UserProfile>) => void;
   logout: () => void;
@@ -58,17 +58,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Simple Login by Username
-  const login = (username: string): boolean => {
-    const cleanUsername = username.trim().toLowerCase();
-    if (!cleanUsername) return false;
+  // Simple Login by Username or Nickname (Async with PostgreSQL / Supabase fallback)
+  const login = async (identifier: string): Promise<boolean> => {
+    const clean = identifier.trim().toLowerCase();
+    if (!clean) return false;
 
+    // 1. Check local users database first (match by username key or by nickname/username in user object)
     const db = getUsersDB();
-    const existing = db[cleanUsername];
+    let existing: UserProfile | undefined = db[clean];
+    if (!existing) {
+      existing = Object.values(db).find(
+        (u) =>
+          (u.username && u.username.toLowerCase() === clean) ||
+          (u.nickname && u.nickname.toLowerCase() === clean)
+      );
+    }
 
     if (existing) {
       setCurrentUser(existing);
-      localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(existing));
+      try {
+        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(existing));
+      } catch {}
       upsertApiProfile(existing);
       if (isSupabaseConfigured()) {
         upsertRemoteProfile(existing);
@@ -76,30 +86,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     }
 
-    // Try fetching from PostgreSQL API
-    fetchApiProfile(cleanUsername).then((dbUser) => {
+    // 2. Try fetching from PostgreSQL API
+    try {
+      const dbUser = await fetchApiProfile(clean);
       if (dbUser) {
         const updatedDb = getUsersDB();
-        updatedDb[cleanUsername] = dbUser;
+        updatedDb[dbUser.username.toLowerCase()] = dbUser;
         saveUsersDB(updatedDb);
         setCurrentUser(dbUser);
-        localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(dbUser));
-        return;
+        try {
+          localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(dbUser));
+        } catch {}
+        return true;
       }
+    } catch (e) {
+      console.warn('Failed to fetch profile from PostgreSQL API:', e);
+    }
 
-      // If not in PostgreSQL, attempt Supabase if configured
-      if (isSupabaseConfigured()) {
-        fetchRemoteProfile(cleanUsername).then((remoteUser) => {
-          if (remoteUser) {
-            const updatedDb = getUsersDB();
-            updatedDb[cleanUsername] = remoteUser;
-            saveUsersDB(updatedDb);
-            setCurrentUser(remoteUser);
+    // 3. If not in PostgreSQL, attempt Supabase if configured
+    if (isSupabaseConfigured()) {
+      try {
+        const remoteUser = await fetchRemoteProfile(clean);
+        if (remoteUser) {
+          const updatedDb = getUsersDB();
+          updatedDb[remoteUser.username.toLowerCase()] = remoteUser;
+          saveUsersDB(updatedDb);
+          setCurrentUser(remoteUser);
+          try {
             localStorage.setItem(STORAGE_KEY_CURRENT_USER, JSON.stringify(remoteUser));
-          }
-        });
+          } catch {}
+          return true;
+        }
+      } catch (e) {
+        console.warn('Failed to fetch profile from Supabase:', e);
       }
-    });
+    }
 
     return false;
   };
@@ -167,7 +188,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Logout
   const logout = () => {
     setCurrentUser(null);
-    localStorage.removeItem(STORAGE_KEY_CURRENT_USER);
+    try {
+      localStorage.removeItem(STORAGE_KEY_CURRENT_USER);
+      localStorage.removeItem('loy_krathong_my_id');
+      localStorage.removeItem('loy_krathong_my_item');
+    } catch {}
   };
 
   return (

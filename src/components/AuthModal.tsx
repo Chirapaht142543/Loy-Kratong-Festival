@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useDialog } from '@/context/DialogContext';
 import { PRESET_AVATARS, compressImageFile } from '@/lib/imageUtils';
 import { Gender, DayOfWeek, ZodiacSign } from '@/types/krathong';
+import { RiverKrathongItem } from './MainRiverView';
 import { ZODIAC_INFO, DAY_THAI } from '@/lib/astrology';
 import { FacebookIcon, InstagramIcon, TikTokIcon } from './Icons';
 import {
@@ -19,9 +20,16 @@ import {
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  myKrathong?: RiverKrathongItem | null;
+  onViewMyKrathong?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({
+  isOpen,
+  onClose,
+  myKrathong,
+  onViewMyKrathong,
+}) => {
   const { currentUser, isLoggedIn, login, register, updateProfile, logout } = useAuth();
   const { confirm, alert, toast } = useDialog();
 
@@ -33,6 +41,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   // Login form state
   const [loginUsername, setLoginUsername] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Register / Profile form state
   const [username, setUsername] = useState(currentUser?.username || '');
@@ -56,48 +65,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   useEffect(() => {
     if (!isOpen) return;
 
-    let draftProfile: any = null;
-    let draftItem: any = null;
-    try {
-      const savedDraft = localStorage.getItem('loy_krathong_saved_single_profile');
-      if (savedDraft) draftProfile = JSON.parse(savedDraft);
-      const savedItem = localStorage.getItem('loy_krathong_my_item');
-      if (savedItem) draftItem = JSON.parse(savedItem);
-    } catch {}
-
     if (currentUser) {
       setUsername(currentUser.username || '');
-      setNickname(currentUser.nickname || draftProfile?.nickname || draftItem?.name || '');
-      setAvatarUrl(currentUser.avatarUrl || draftProfile?.avatarUrl || draftItem?.avatarUrl || PRESET_AVATARS[0].url);
-      setGender(currentUser.gender || draftProfile?.gender || 'female');
-      setBirthDay(currentUser.birthDay || draftProfile?.birthDay || 'friday');
-      setZodiac(currentUser.zodiac || draftProfile?.zodiac || 'libra');
-      setFacebook(currentUser.contacts?.facebook || draftProfile?.contacts?.facebook || '');
-      setInstagram(currentUser.contacts?.instagram || draftProfile?.contacts?.instagram || '');
-      setTiktok(currentUser.contacts?.tiktok || draftProfile?.contacts?.tiktok || '');
-      setAllowContact(currentUser.allowContact ?? draftProfile?.allowContact ?? true);
-      setBio(currentUser.bio || draftProfile?.wish || draftItem?.wish || '');
+      setNickname(currentUser.nickname || '');
+      setAvatarUrl(currentUser.avatarUrl || PRESET_AVATARS[0].url);
+      setGender(currentUser.gender || 'female');
+      setBirthDay(currentUser.birthDay || 'friday');
+      setZodiac(currentUser.zodiac || 'libra');
+      setFacebook(currentUser.contacts?.facebook || '');
+      setInstagram(currentUser.contacts?.instagram || '');
+      setTiktok(currentUser.contacts?.tiktok || '');
+      setAllowContact(currentUser.allowContact ?? true);
+      setBio(currentUser.bio || '');
       setMode('register');
     } else {
-      if (draftProfile || draftItem) {
-        const prefilledNick = draftProfile?.nickname || draftItem?.name || '';
-        setNickname(prefilledNick);
-        setUsername(prefilledNick ? prefilledNick.toLowerCase().replace(/[^a-z0-9_]/g, '') : '');
-        setAvatarUrl(draftProfile?.avatarUrl || draftItem?.avatarUrl || PRESET_AVATARS[0].url);
-        setGender(draftProfile?.gender || 'female');
-        setBirthDay(draftProfile?.birthDay || 'friday');
-        setZodiac(draftProfile?.zodiac || 'libra');
-        setFacebook(draftProfile?.contacts?.facebook || '');
-        setInstagram(draftProfile?.contacts?.instagram || '');
-        setTiktok(draftProfile?.contacts?.tiktok || '');
-        setAllowContact(draftProfile?.allowContact ?? true);
-        setBio(draftProfile?.wish || draftItem?.wish || '');
-        setMode('register');
-      } else {
-        setMode(isLoggedIn ? 'register' : 'login');
-      }
+      // If not logged in, default to login mode
+      setMode('login');
+      setLoginUsername('');
+      setLoginError('');
+
+      // Prefill draft in registration tab if user switches to register
+      try {
+        const savedDraft = localStorage.getItem('loy_krathong_saved_single_profile');
+        const parsedDraft = savedDraft ? JSON.parse(savedDraft) : null;
+        if (parsedDraft) {
+          const prefilledNick = parsedDraft.nickname || '';
+          setNickname(prefilledNick);
+          setUsername(prefilledNick ? prefilledNick.toLowerCase().replace(/[^a-z0-9_]/g, '') : '');
+          setAvatarUrl(parsedDraft.avatarUrl || PRESET_AVATARS[0].url);
+          setGender(parsedDraft.gender || 'female');
+          setBirthDay(parsedDraft.birthDay || 'friday');
+          setZodiac(parsedDraft.zodiac || 'libra');
+          setFacebook(parsedDraft.contacts?.facebook || '');
+          setInstagram(parsedDraft.contacts?.instagram || '');
+          setTiktok(parsedDraft.contacts?.tiktok || '');
+          setAllowContact(parsedDraft.allowContact ?? true);
+          setBio(parsedDraft.wish || '');
+        }
+      } catch {}
     }
-  }, [isOpen, currentUser, isLoggedIn]);
+  }, [isOpen, currentUser]);
 
   if (!isOpen) return null;
 
@@ -118,21 +125,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Handle Login Submit
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  // Handle Login Submit (Async)
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
 
-    if (!loginUsername.trim()) {
-      setLoginError('กรุณากรอกชื่อผู้ใช้');
+    const cleanInput = loginUsername.trim();
+    if (!cleanInput) {
+      setLoginError('กรุณากรอกชื่อเล่น หรือชื่อผู้ใช้');
       return;
     }
 
-    const success = login(loginUsername);
-    if (success) {
-      onClose();
-    } else {
-      setLoginError('ไม่พบบัญชีนี้ คุณสามารถกดแท็บ "สร้างโปรไฟล์ใหม่" เพื่อเริ่มต้นได้เลย');
+    try {
+      setIsLoggingIn(true);
+      const success = await login(cleanInput);
+      if (success) {
+        toast.success(`ยินดีต้อนรับกลับ, ${cleanInput}! ✨`);
+        onClose();
+      } else {
+        setLoginError('ไม่พบบัญชีนี้ คุณสามารถตรวจสอบชื่อที่กรอก หรือกดแท็บ "สร้างโปรไฟล์" เพื่อเริ่มต้นได้เลย');
+      }
+    } catch {
+      setLoginError('เกิดข้อผิดพลาดในการเข้าสู่ระบบ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -254,11 +270,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </button>
           </div>
         ) : (
-          <div className="text-center mb-6">
-            <span className="inline-flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-3 py-1 rounded-full mb-2">
-              <User className="w-3.5 h-3.5" /> จัดการโปรไฟล์ของคุณ
-            </span>
-            <h2 className="text-2xl font-bold text-amber-200">แก้ไขข้อมูล & รูปโปรไฟล์</h2>
+          <div className="space-y-4 mb-6">
+            <div className="text-center">
+              <span className="inline-flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs px-3 py-1 rounded-full mb-2">
+                <User className="w-3.5 h-3.5" /> บัญชีของคุณ
+              </span>
+              <h2 className="text-2xl font-bold text-amber-200">{currentUser?.nickname}</h2>
+              <p className="text-xs text-slate-400">@{currentUser?.username}</p>
+            </div>
+
+            {/* Krathong Status Card */}
+            {myKrathong ? (
+              <div className="bg-gradient-to-r from-amber-500/15 to-yellow-500/10 border border-amber-400/40 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3 shadow-lg">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-xl shrink-0">
+                    🪷
+                  </div>
+                  <div className="min-w-0 text-left">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                      <span>กระทงของคุณอยู่ในสายน้ำ</span>
+                      <span className="bg-amber-400 text-slate-950 text-[10px] px-1.5 py-0.2 rounded-full font-extrabold">1/1</span>
+                    </div>
+                    <p className="text-xs text-slate-300 truncate font-medium">
+                      &quot;{myKrathong.name}&quot; {myKrathong.wish ? `• ${myKrathong.wish}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                {onViewMyKrathong && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onViewMyKrathong();
+                    }}
+                    className="shrink-0 bg-gradient-to-r from-amber-400 to-yellow-300 hover:from-amber-300 hover:to-yellow-200 text-slate-950 font-bold px-3 py-2 rounded-xl text-xs shadow-md transition transform hover:scale-102 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>✨</span>
+                    <span>วาร์ปไปดู</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 text-center">
+                <p className="text-xs text-slate-300">
+                  คุณยังไม่มีกระทงในสายน้ำรอบนี้ (สามารถลอยได้ 1 ท่าน / 1 ใบ)
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -266,24 +325,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         {mode === 'login' && !isLoggedIn && (
           <form onSubmit={handleLoginSubmit} className="space-y-5">
             <div className="text-center pb-2">
-              <h2 className="text-2xl font-bold text-amber-200">เข้าสู่ระบบอย่างง่าย</h2>
+              <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-2xl mx-auto mb-2">
+                🔑
+              </div>
+              <h2 className="text-2xl font-bold text-amber-200">เข้าสู่ระบบ</h2>
               <p className="text-xs text-slate-400 mt-1">
-                กรอกชื่อบัญชี (Username) ที่เคยสร้างไว้เพื่อดึงข้อมูลโปรไฟล์และวาร์ปของคุณ
+                กรอกชื่อเล่น หรือชื่อบัญชีของคุณ เพื่อค้นหากระทงและจัดการโปรไฟล์
               </p>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-200 mb-1.5">
-                ชื่อผู้ใช้ (Username)
+                ชื่อเล่น หรือ ชื่อผู้ใช้ (Nickname / Username)
               </label>
               <input
                 type="text"
                 required
+                disabled={isLoggingIn}
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
-                placeholder="เช่น ploy_cute, win99"
-                className="w-full bg-slate-800/80 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-2xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-400"
+                placeholder="เช่น มายด์, ต้น, win99"
+                className="w-full bg-slate-800/80 border border-slate-700 text-slate-100 placeholder-slate-500 rounded-2xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
               />
+              <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1">
+                <span>💡</span>
+                <span>สามารถใช้ชื่อเล่นเดียวกับที่ระบุบนกระทงของคุณเพื่อค้นหาได้ทันที</span>
+              </p>
               {loginError && (
                 <p className="text-xs text-rose-400 mt-2 bg-rose-500/10 border border-rose-500/30 p-2.5 rounded-xl">
                   {loginError}
@@ -293,9 +360,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bold py-3.5 rounded-2xl text-sm shadow-lg shadow-amber-500/20 transition"
+              disabled={isLoggingIn}
+              className="w-full bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-bold py-3.5 rounded-2xl text-sm shadow-lg shadow-amber-500/20 transition flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
             >
-              เข้าสู่ระบบทันที
+              {isLoggingIn ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                  <span>กำลังค้นหาบัญชีและกระทง...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4" />
+                  <span>เข้าสู่ระบบเพื่อค้นหากระทง</span>
+                </>
+              )}
             </button>
           </form>
         )}
@@ -520,7 +598,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     onClick={async () => {
                       const ok = await confirm({
                         title: 'ออกจากระบบ',
-                        message: 'ต้องการออกจากระบบใช่หรือไม่?\nคุณสามารถกลับมาเข้าสู่ระบบได้ตลอดเวลา',
+                        message: 'ต้องการออกจากระบบใช่หรือไม่?\nกระทงของคุณจะยังคงลอยอยู่ในสายน้ำตามปกติ แต่จะไม่แสดงเป็นกระทงของคุณบนเครื่องนี้ จนกว่าจะเข้าสู่ระบบใหม่อีกครั้ง',
                         confirmText: 'ออกจากระบบ',
                         cancelText: 'ยกเลิก',
                         type: 'danger',

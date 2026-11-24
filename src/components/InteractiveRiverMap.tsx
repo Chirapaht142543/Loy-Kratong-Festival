@@ -35,11 +35,14 @@ import {
   Waves,
   Flame,
   ChevronDown,
+  LogIn,
 } from 'lucide-react';
 
 interface InteractiveRiverMapProps {
   krathongs: RiverKrathongItem[];
   myKrathongId?: string | null;
+  onOpenAuthModal?: () => void;
+  onOpenHowToFloat?: () => void;
   onFloatSingleAtPier: (pier: PierLocation) => void;
   onFloatCoupleAtPier: (pier: PierLocation) => void;
   onFloatFamilyAtPier?: (pier: PierLocation) => void;
@@ -49,6 +52,8 @@ interface InteractiveRiverMapProps {
 export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
   krathongs,
   myKrathongId,
+  onOpenAuthModal,
+  onOpenHowToFloat,
   onFloatSingleAtPier,
   onFloatCoupleAtPier,
   onFloatFamilyAtPier,
@@ -150,16 +155,16 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Smooth River Current Animation Loop with 35 FPS frame pacing (eliminates React CPU thrashing)
+  // Smooth River Current Animation Loop with 24 FPS frame pacing (eliminates React CPU thrashing)
   useEffect(() => {
     let frameId: number;
     let lastRenderTime = performance.now();
-    const TARGET_FPS = 35; // Majestic slow drift at 35 FPS saves over 60% CPU
+    const TARGET_FPS = 24; // Majestic slow drift at 24 FPS saves over 50% CPU
     const frameInterval = 1000 / TARGET_FPS;
 
     const updateFlow = (now: number) => {
       frameId = requestAnimationFrame(updateFlow);
-      if (!isFlowing) return;
+      if (!isFlowing || (typeof document !== 'undefined' && document.hidden)) return;
 
       const elapsed = now - lastRenderTime;
       if (elapsed >= frameInterval) {
@@ -232,44 +237,50 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
     [glideTo]
   );
 
-  // Performance: rAF throttling refs for pointer events
+  // Performance: stable refs for pointer events so event listeners are attached once
   const mouseRafRef = useRef<number | null>(null);
   const touchRafRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  zoomRef.current = zoom;
+  panRef.current = pan;
+  isDraggingRef.current = isDragging;
 
   // Mouse Pan Handlers with rAF Throttling
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.interactive-el')) return;
     setIsDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    isDraggingRef.current = true;
+    dragStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
   };
 
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!isDragging) return;
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
       if (mouseRafRef.current) return;
       const clientX = e.clientX;
       const clientY = e.clientY;
       mouseRafRef.current = requestAnimationFrame(() => {
         mouseRafRef.current = null;
-        const clamped = clampPan(clientX - dragStart.x, clientY - dragStart.y, zoom);
+        const clamped = clampPan(clientX - dragStartRef.current.x, clientY - dragStartRef.current.y, zoomRef.current);
         setPan(clamped);
       });
-    },
-    [isDragging, dragStart, zoom, clampPan]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
-  useEffect(() => {
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [handleMouseMove, handleMouseUp]);
+
+    const onMouseUp = () => {
+      setIsDragging(false);
+      isDraggingRef.current = false;
+    };
+
+    window.addEventListener('mousemove', onMouseMove, { passive: true });
+    window.addEventListener('mouseup', onMouseUp, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [clampPan]);
 
   // Touch Pan & Pinch Zoom Handlers
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -429,29 +440,10 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
   // SVG Centerline Path
   const riverPathD = useMemo(() => getRiverCenterlinePath(), []);
 
-  // Compute Krathongs dynamic coordinates along the single river
-  const computedKrathongs = useMemo(() => {
+  // Pre-filter Krathongs ONLY when filterMode, searchQuery, or krathongs change (NOT on every animation frame)
+  const filteredKrathongs = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
     return krathongs.map((item, idx) => {
-      const baseT = ((idx * 0.6180339887) % 1);
-      const speedMult = 0.8 + ((idx * 7) % 5) * 0.1;
-      const currentT = (baseT + riverFlowTime * speedMult) % 1;
-      const lateral = (((idx * 43) % 220) - 110);
-      const bob = Math.sin(riverFlowTime * 40 + idx * 2.2) * 4;
-
-      // Freeze coordinate drift while hovered so it does not slip away from cursor
-      let coords: { x: number; y: number };
-      if (hoveredKrathongId === item.id) {
-        if (!frozenCoordsRef.current.has(item.id)) {
-          const fresh = getKrathongCoordinates(currentT, lateral, bob);
-          frozenCoordsRef.current.set(item.id, fresh);
-        }
-        coords = frozenCoordsRef.current.get(item.id)!;
-      } else {
-        frozenCoordsRef.current.delete(item.id);
-        coords = getKrathongCoordinates(currentT, lateral, bob);
-      }
-
-      const query = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !query ||
         item.name.toLowerCase().includes(query) ||
@@ -471,6 +463,35 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
         (filterMode === 'couple' && item.mode === 'couple') ||
         (filterMode === 'family' && item.mode === 'family');
 
+      return {
+        item,
+        idx,
+        matchesSearch,
+        matchesFilter,
+      };
+    });
+  }, [krathongs, searchQuery, filterMode]);
+
+  // Compute Krathongs dynamic coordinates along the single river for each frame
+  const computedKrathongs = useMemo(() => {
+    const total = Math.max(filteredKrathongs.length, 1);
+    const spacing = 1 / total;
+    // 5 balanced lanes across river channel safely inside RIVER_WIDTH 370
+    const laneOffsets = [-95, -45, 0, 45, 95];
+
+    return filteredKrathongs.map(({ item, idx, matchesSearch, matchesFilter }) => {
+      // Evenly distributed base distance along river
+      const baseT = (idx * spacing) % 1;
+      // All krathongs advance along the river current at uniform flow speed (never collide or overtake)
+      const currentT = (baseT + riverFlowTime) % 1;
+
+      // Assigned lane + gentle harmonic wave sway
+      const assignedLane = laneOffsets[idx % laneOffsets.length];
+      const waveSway = Math.sin(riverFlowTime * 20 + idx * 1.8) * 10;
+      const lateral = Math.max(-125, Math.min(125, assignedLane + waveSway));
+      const bob = Math.sin(riverFlowTime * 35 + idx * 2.5) * 3.5;
+
+      const coords = getKrathongCoordinates(currentT, lateral, bob);
       const isMyKrathong = Boolean(myKrathongId && item.id === myKrathongId);
 
       return {
@@ -482,7 +503,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
         isMyKrathong,
       };
     });
-  }, [krathongs, riverFlowTime, searchQuery, filterMode, myKrathongId, hoveredKrathongId]);
+  }, [filteredKrathongs, riverFlowTime, myKrathongId]);
 
   // Fly to and focus user's own Krathong
   const handleFindMyKrathong = useCallback(() => {
@@ -560,102 +581,10 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
                   isFaded ? 'pointer-events-none' : 'hover:scale-135 hover:z-50'
                 } ${isHovered ? 'z-50 scale-135' : isMyKrathong ? 'z-40 scale-125' : isSelected ? 'z-40 scale-135' : 'z-20'}`}
               >
-                {/* Large Profile Hover Card (เมื่อเอาเมาส์มาชี้) */}
+                {/* Compact hover indicator hint */}
                 {isHovered && (
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setFocusedKrathongId(item.id);
-                      onSelectKrathong(item);
-                    }}
-                    className={`absolute ${
-                      isNearTop ? 'top-full mt-4' : 'bottom-full mb-4'
-                    } left-1/2 -translate-x-1/2 w-72 bg-slate-950/95 border-2 border-amber-400 rounded-3xl p-4 shadow-[0_15px_45px_rgba(0,0,0,0.9),0_0_35px_rgba(251,191,36,0.4)] backdrop-blur-2xl z-50 pointer-events-auto cursor-pointer animate-in fade-in zoom-in-95 duration-150 text-center`}
-                  >
-                    {/* Mode Badge & Likes */}
-                    <div className="flex items-center justify-between mb-2.5">
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                          isMyKrathong
-                            ? 'bg-amber-400 text-slate-950 border-amber-300'
-                            : item.isMatchedWithMe
-                            ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white border-pink-400 shadow-md animate-pulse'
-                            : item.mode === 'couple'
-                            ? 'bg-pink-500/20 text-pink-300 border-pink-500/40'
-                            : item.mode === 'family'
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                            : 'bg-pink-500/15 text-pink-300 border-pink-500/30'
-                        }`}
-                      >
-                        {isMyKrathong
-                          ? '👑 กระทงของคุณ'
-                          : item.isMatchedWithMe
-                          ? '💕 ใจตรงกัน (ปลดล็อกวาร์ป)'
-                          : item.mode === 'couple'
-                          ? '👩‍❤️‍👨 กระทงคู่รัก'
-                          : item.mode === 'family'
-                          ? '👨‍👩‍👧‍👦 กระทงครอบครัว'
-                          : '💖 คนโสดหาคู่'}
-                      </span>
-                      <span className="text-xs font-extrabold text-pink-400 flex items-center gap-1">
-                        ❤️ {item.likes}
-                      </span>
-                    </div>
-
-                    {/* Big Profile Picture / Avatar */}
-                    <div className="relative mx-auto mb-2.5 w-24 h-24 rounded-2xl overflow-hidden border-2 border-amber-400 shadow-xl group/img">
-                      {item.avatarUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={item.avatarUrl}
-                          alt={item.name}
-                          className="w-full h-full object-cover group-hover/img:scale-110 transition duration-300"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gradient-to-tr from-amber-500/30 to-pink-500/30 flex items-center justify-center text-4xl">
-                          {item.mode === 'couple' ? '👩‍❤️‍👨' : item.mode === 'family' ? '👨‍👩‍👧‍👦' : '🪷'}
-                        </div>
-                      )}
-                      {isMyKrathong && (
-                        <span className="absolute top-1 right-1 bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-black shadow-md">
-                          👑
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Owner Name & Zodiac */}
-                    <h4 className="text-base font-extrabold text-amber-200 leading-tight">
-                      {item.name}
-                      {item.partnerName && (
-                        <span className="text-pink-300 font-bold"> ❤️ {item.partnerName}</span>
-                      )}
-                    </h4>
-
-                    {item.zodiac && (
-                      <div className="text-[11px] text-slate-400 mt-0.5 font-medium">
-                        {item.zodiac}
-                      </div>
-                    )}
-
-                    {/* Wish Quotation */}
-                    <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 my-2.5 text-xs text-slate-200 italic leading-relaxed text-left">
-                      &ldquo;{item.wish}&rdquo;
-                    </div>
-
-                    {/* Action Prompt */}
-                    <div className="pt-1 flex items-center justify-center">
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-[11px] font-extrabold shadow-md transition transform group-hover:scale-105">
-                        <span>🔍</span>
-                        <span>คลิกเพื่อดูการ์ดเต็ม & ส่งหัวใจ</span>
-                      </div>
-                    </div>
-
-                    {/* Indicator Triangle */}
-                    {isNearTop ? (
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-[1px] border-solid border-b-amber-400 border-b-8 border-x-transparent border-x-8 border-t-0" />
-                    ) : (
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-solid border-t-amber-400 border-t-8 border-x-transparent border-x-8 border-b-0" />
-                    )}
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap px-2.5 py-0.5 rounded-full bg-slate-950/95 border border-amber-400 text-[11px] text-amber-200 font-bold shadow-xl pointer-events-none animate-in fade-in duration-150 z-50">
+                    👆 คลิกเพื่อดูการ์ด
                   </div>
                 )}
 
@@ -785,12 +714,12 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
       {/* ========================================================= */}
       {/* 2. TOP FLOATING HUD & NAVIGATION BAR                      */}
       {/* ========================================================= */}
-      <div className="absolute top-3 inset-x-3 sm:inset-x-6 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pointer-events-none z-40">
+      <div className="absolute top-3 left-3 sm:left-6 right-16 sm:right-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 pointer-events-none z-40">
         {/* Title & Quick Filter Bar */}
-        <div className="flex items-center gap-2 pointer-events-auto">
+        <div className="flex flex-wrap items-center gap-2 pointer-events-auto">
           {/* Main Title Badge */}
-          <div className="bg-slate-950/85 border border-amber-500/40 px-4 py-2 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2.5">
-            <span className="text-2xl">🌕</span>
+          <div className="bg-slate-950/85 border border-amber-500/40 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-2xl shadow-2xl backdrop-blur-xl flex items-center gap-2.5">
+            <span className="text-xl sm:text-2xl">🌕</span>
             <div>
               <h2 className="text-xs sm:text-sm font-extrabold text-amber-200 leading-tight">
                 สายธารมหานครา ๒๕๖๙
@@ -806,7 +735,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
           <div className="flex bg-slate-950/85 border border-slate-800 p-1 rounded-2xl shadow-xl backdrop-blur-xl">
             <button
               onClick={() => setFilterMode('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-bold transition ${
                 filterMode === 'all'
                   ? 'bg-amber-400 text-slate-950 shadow'
                   : 'text-slate-400 hover:text-slate-200'
@@ -816,7 +745,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
             </button>
             <button
               onClick={() => setFilterMode('single')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
                 filterMode === 'single'
                   ? 'bg-pink-500 text-white shadow'
                   : 'text-slate-400 hover:text-pink-300'
@@ -827,7 +756,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
             </button>
             <button
               onClick={() => setFilterMode('couple')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
                 filterMode === 'couple'
                   ? 'bg-rose-500 text-white shadow'
                   : 'text-slate-400 hover:text-rose-300'
@@ -838,7 +767,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
             </button>
             <button
               onClick={() => setFilterMode('family')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
+              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
                 filterMode === 'family'
                   ? 'bg-amber-400 text-slate-950 font-bold shadow'
                   : 'text-slate-400 hover:text-amber-300'
@@ -863,8 +792,21 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
             title="คลิกเพื่อเลื่อนกล้องไปยังกระทงของคุณ"
           >
             <span>👑</span>
-            <span>ดูกระทงของฉัน</span>
+            <span>{myKrathongId ? 'ดูกระทงของฉัน (1/1 ใบ)' : 'ดูกระทงของฉัน'}</span>
           </button>
+
+          {/* How to Float Guide Quick Action */}
+          {onOpenHowToFloat && (
+            <button
+              onClick={onOpenHowToFloat}
+              className="px-3 py-1.5 rounded-2xl text-xs font-bold shadow-xl backdrop-blur-xl flex items-center gap-1.5 transition transform hover:scale-105 active:scale-95 whitespace-nowrap bg-gradient-to-r from-pink-500/20 via-rose-500/20 to-amber-500/20 hover:from-pink-500/30 hover:to-amber-500/30 text-amber-200 border border-amber-500/40 cursor-pointer"
+              title="แนะนำวิธีการลอยกระทงแบบต่างๆ (คนโสด / คู่รัก / ครอบครัว)"
+            >
+              <span>💡</span>
+              <span className="hidden sm:inline">วิธีลอยกระทง</span>
+              <span className="sm:hidden">วิธีลอย</span>
+            </button>
+          )}
 
           {/* Search Krathong by Name */}
           <div className="relative flex items-center">
@@ -913,11 +855,11 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
       {/* ========================================================= */}
       {/* 3. FLOATING ZOOM & RIVER VIEW CONTROLS (Right Edge)       */}
       {/* ========================================================= */}
-      <div className="absolute right-4 top-20 flex flex-col gap-2 z-40">
+      <div className="absolute right-3 sm:right-5 top-3 sm:top-4 flex flex-col gap-2 z-40 pointer-events-auto">
         {/* Zoom In */}
         <button
           onClick={handleZoomIn}
-          className="w-11 h-11 rounded-2xl bg-slate-900/95 border border-slate-700 hover:border-amber-400 text-slate-200 hover:text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95"
+          className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-slate-900/95 border border-slate-700 hover:border-amber-400 text-slate-200 hover:text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95"
           title="ซูมเข้า (+)"
         >
           <Plus className="w-5 h-5" />
@@ -926,7 +868,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
         {/* Zoom Percent Readout (Cycles presets on click) */}
         <button
           onClick={handleCycleZoomPreset}
-          className="h-8 px-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-xs font-bold text-amber-300 shadow-xl backdrop-blur-md flex items-center justify-center cursor-pointer hover:border-amber-400 transition"
+          className="h-7 sm:h-8 px-2 sm:px-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-[11px] sm:text-xs font-bold text-amber-300 shadow-xl backdrop-blur-md flex items-center justify-center cursor-pointer hover:border-amber-400 transition"
           title="คลิกเพื่อสลับขนาดซูม (100% / 150% / 65%)"
         >
           {Math.round(zoom * 100)}%
@@ -935,7 +877,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
         {/* Zoom Out */}
         <button
           onClick={handleZoomOut}
-          className="w-11 h-11 rounded-2xl bg-slate-900/95 border border-slate-700 hover:border-amber-400 text-slate-200 hover:text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95"
+          className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-slate-900/95 border border-slate-700 hover:border-amber-400 text-slate-200 hover:text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95"
           title="ซูมออก (-)"
         >
           <Minus className="w-5 h-5" />
@@ -944,7 +886,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
         {/* Reset View */}
         <button
           onClick={handleReset}
-          className="w-11 h-11 rounded-2xl bg-slate-900/95 border border-slate-700 hover:border-amber-400 text-slate-200 hover:text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95"
+          className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-slate-900/95 border border-slate-700 hover:border-amber-400 text-slate-200 hover:text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95"
           title="รีเซ็ตมุมมองกึ่งกลางแม่น้ำ"
         >
           <RotateCcw className="w-4 h-4" />
@@ -955,7 +897,7 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
         {/* Play / Pause River Current Flow */}
         <button
           onClick={() => setIsFlowing(!isFlowing)}
-          className={`w-11 h-11 rounded-2xl border shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95 ${
+          className={`w-10 h-10 sm:w-11 sm:h-11 rounded-2xl border shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95 ${
             isFlowing
               ? 'bg-cyan-950/90 border-cyan-500/50 text-cyan-300'
               : 'bg-slate-900/95 border-slate-700 text-slate-400'
@@ -965,18 +907,16 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
           {isFlowing ? <Waves className="w-5 h-5" /> : <Play className="w-4 h-4" />}
         </button>
 
-        {/* Jump to User's Krathong */}
-        <button
-          onClick={handleFindMyKrathong}
-          className={`w-11 h-11 rounded-2xl shadow-2xl flex items-center justify-center transition active:scale-95 hover:scale-105 ${
-            myKrathongId
-              ? 'bg-gradient-to-tr from-amber-400 via-yellow-300 to-amber-500 text-slate-950 ring-2 ring-yellow-300 shadow-[0_0_15px_rgba(251,191,36,0.7)] animate-pulse'
-              : 'bg-slate-900/95 border border-slate-700 text-amber-300 hover:border-amber-400'
-          }`}
-          title="วาร์ปไปดูกระทงของฉัน"
-        >
-          <span className="text-base">👑</span>
-        </button>
+        {/* How to Float Guide Button */}
+        {onOpenHowToFloat && (
+          <button
+            onClick={onOpenHowToFloat}
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-amber-500/20 border border-amber-500/50 hover:bg-amber-500/30 text-amber-300 shadow-2xl backdrop-blur-xl flex items-center justify-center transition active:scale-95 cursor-pointer"
+            title="แนะนำวิธีการลอยกระทงแบบต่างๆ (คลิกดูวิธีลอย)"
+          >
+            <HelpCircle className="w-5 h-5 text-amber-300" />
+          </button>
+        )}
       </div>
 
       {/* ========================================================= */}
@@ -1069,6 +1009,13 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
               </div>
             </div>
 
+            {/* 1 User 1 Krathong Notice */}
+            {myKrathongId && (
+              <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-xl mb-3 text-center font-medium">
+                🌕 คุณมีกระทงลอยอยู่ในสายน้ำแล้ว (กติกา: 1 ท่านลอยได้ 1 ใบ หากลอยใหม่จะแทนที่ใบเดิม)
+              </div>
+            )}
+
             {/* Float Buttons at this Pier */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3 border-t border-slate-800">
               <button
@@ -1116,10 +1063,25 @@ export const InteractiveRiverMap: React.FC<InteractiveRiverMapProps> = ({
             <h3 className="text-xl font-bold text-amber-200 mb-2">
               ยังไม่พบกระทงของคุณในสายน้ำ
             </h3>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-6">
-              คุณยังไม่ได้ลอยกระทงในรอบนี้<br />
-              มาร่วมเขียนคำอธิษฐานและส่งกระทงของคุณลงสู่แม่น้ำสายธารได้เลยทันที!
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-5">
+              หากคุณเคยลอยกระทงไว้แล้ว หรือเปิดจากอุปกรณ์อื่น สามารถเข้าสู่ระบบด้วยชื่อของคุณเพื่อค้นหากระทงได้ทันที หรือเลือกลอยกระทงใบใหม่
             </p>
+
+            {onOpenAuthModal && (
+              <button
+                onClick={() => {
+                  setIsNoMyKrathongModalOpen(false);
+                  onOpenAuthModal();
+                }}
+                className="w-full mb-4 flex items-center justify-center gap-2 bg-gradient-to-r from-amber-400 to-yellow-300 hover:from-amber-300 hover:to-yellow-200 text-slate-950 font-bold py-3 px-4 rounded-2xl text-xs sm:text-sm shadow-xl transition transform hover:scale-102"
+              >
+                <LogIn className="w-4 h-4" /> เข้าสู่ระบบเพื่อค้นหากระทงของคุณ
+              </button>
+            )}
+
+            <div className="text-[11px] font-semibold text-slate-400 mb-2.5">
+              — หรือเลือกลอยกระทงใบใหม่ —
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button

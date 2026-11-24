@@ -12,6 +12,7 @@ import { FamilyFlow } from '@/components/FamilyFlow';
 import { RiverScene } from '@/components/RiverScene';
 import { ResultCardModal } from '@/components/ResultCardModal';
 import { AuthModal } from '@/components/AuthModal';
+import { HowToFloatModal, FloatGuideTab } from '@/components/HowToFloatModal';
 import { KrathongGalleryModal } from '@/components/KrathongGalleryModal';
 import { MatchCelebrationModal } from '@/components/MatchCelebrationModal';
 import { MatchCenterModal, MatchRecord } from '@/components/MatchCenterModal';
@@ -33,23 +34,27 @@ import {
   subscribeToRealtimeKrathongs,
 } from '@/lib/supabase';
 import { User, LogIn, X, Heart, ExternalLink, Copy, Check, Flame } from 'lucide-react';
+import { DEFAULT_COMMUNITY_KRATHONGS } from '@/lib/communityKrathongs';
 
 type AppView = 'landing' | 'single_form' | 'couple_form' | 'family_form' | 'river';
 
-// Initial River Krathongs (starts clean; dynamically loaded from Database / local storage)
+// Initial River Krathongs (rich fallback community krathongs so river is never empty)
 const createInitialRiverKrathongs = (): RiverKrathongItem[] => {
-  return [];
+  return [...DEFAULT_COMMUNITY_KRATHONGS];
 };
 
 export default function Home() {
   const { currentUser, isLoggedIn, register, updateProfile } = useAuth();
-  const { toast } = useDialog();
+  const { toast, confirm, alert } = useDialog();
   const [view, setView] = useState<AppView>('landing');
   const [selectedMode, setSelectedMode] = useState<'single' | 'couple' | 'family'>('single');
   const [selectedPier, setSelectedPier] = useState<PierLocation | null>(null);
   const [inspectingKrathong, setInspectingKrathong] = useState<RiverKrathongItem | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [isHowToFloatOpen, setIsHowToFloatOpen] = useState(false);
+  const [howToFloatTab, setHowToFloatTab] = useState<FloatGuideTab>('single');
+  const [initialCoupleRoomCode, setInitialCoupleRoomCode] = useState<string | undefined>(undefined);
 
   // Mutual Match & Like State
   const [likedKrathongIds, setLikedKrathongIds] = useState<string[]>([]);
@@ -70,7 +75,44 @@ export default function Home() {
   const [myKrathongId, setMyKrathongId] = useState<string | null>(null);
   const [isDbConnected, setIsDbConnected] = useState(false);
 
+  // Check 1 user 1 krathong rule before allowing new krathong creation
+  const checkCanFloat = async (onProceed: () => void) => {
+    if (myKrathongId) {
+      const existing = riverKrathongs.find((k) => k.id === myKrathongId);
+      if (existing) {
+        const choice = await confirm({
+          title: 'คุณมีกระทงในสายน้ำแล้ว 🌕',
+          message: `กติกาเทศกาล: 1 ท่านสามารถลอยกระทงได้ 1 ใบเท่านั้น เพื่อร่วมกันดูแลความสะอาดของสายน้ำ\n\nขณะนี้คุณมีกระทง "${existing.name}" ลอยอยู่ในสายน้ำแล้ว\nต้องการลอยกระทงใหม่แทนที่ใบเดิม หรือไปดูกระทงเดิมของคุณ?`,
+          confirmText: 'ลอยใหม่ (แทนที่ใบเดิม)',
+          cancelText: 'ดูกระทงเดิมของฉัน',
+          type: 'warning',
+        });
+        if (choice) {
+          onProceed();
+        } else {
+          setInspectingKrathong(existing);
+        }
+        return;
+      }
+    }
+    onProceed();
+  };
+
   useEffect(() => {
+    // 0. Check invite URL query parameter ?couple_room=CP-XXXX or ?room=CP-XXXX
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('couple_room') || params.get('room');
+        if (code) {
+          setInitialCoupleRoomCode(code.trim().toUpperCase());
+          setSelectedMode('couple');
+          setView('couple_form');
+          toast.info(`เปิดห้องลอยคู่รหัส ${code.trim().toUpperCase()} ให้คุณแล้ว 💕`);
+        }
+      } catch {}
+    }
+
     // 1. Restore local persistence
     try {
       const savedId = localStorage.getItem('loy_krathong_my_id');
@@ -106,26 +148,48 @@ export default function Home() {
       }
     } catch {}
 
-    // 2. Fetch from PostgreSQL Database API & setup auto-refresh polling
+    // 2. Fetch from PostgreSQL Database API with adaptive polling & tab visibility optimization
     let isMounted = true;
+    let pollInterval: NodeJS.Timeout | null = null;
+    let isConfiguredState: boolean | null = null;
+
     const syncFromPostgres = () => {
+      // Don't waste VPS network/CPU if browser tab is hidden or minimized
+      if (typeof document !== 'undefined' && document.hidden) return;
+
       fetchApiKrathongs().then(({ configured, data }) => {
         if (!isMounted) return;
-        if (configured) {
-          setIsDbConnected(true);
-          if (data && data.length > 0) {
-            setRiverKrathongs((prev) => {
-              const remoteIds = new Set(data.map((r) => r.id));
-              const retained = prev.filter((p) => !remoteIds.has(p.id));
-              return [...data, ...retained];
+        setIsDbConnected(true);
+        if (data && data.length > 0) {
+          setRiverKrathongs((prev) => {
+            const prevMap = new Map(prev.map((k) => [k.id, k]));
+            const mergedRemote = data.map((remoteItem) => {
+              const existing = prevMap.get(remoteItem.id);
+              return {
+                ...remoteItem,
+                // Preserve client-side match state if user matched with them
+                isMatchedWithMe: existing?.isMatchedWithMe ?? remoteItem.isMatchedWithMe,
+                // Preserve highest like count between client and remote
+                likes: Math.max(remoteItem.likes || 0, existing?.likes || 0),
+              };
             });
-          }
+            const remoteIds = new Set(data.map((r) => r.id));
+            const retained = prev.filter((p) => !remoteIds.has(p.id));
+            return [...mergedRemote, ...retained];
+          });
         }
       });
     };
 
     syncFromPostgres();
-    const pollInterval = setInterval(syncFromPostgres, 8000);
+    pollInterval = setInterval(syncFromPostgres, 5000); // 5s interval for live river updates
+
+    const handleVisibility = () => {
+      if (!document.hidden) syncFromPostgres();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
 
     // 3. If Supabase is configured as well, subscribe to Realtime
     let unsubscribeSupabase = () => {};
@@ -133,9 +197,18 @@ export default function Home() {
       fetchRemoteKrathongs(150).then((remoteItems) => {
         if (isMounted && remoteItems && remoteItems.length > 0) {
           setRiverKrathongs((prev) => {
+            const prevMap = new Map(prev.map((k) => [k.id, k]));
+            const mergedRemote = remoteItems.map((remoteItem) => {
+              const existing = prevMap.get(remoteItem.id);
+              return {
+                ...remoteItem,
+                isMatchedWithMe: existing?.isMatchedWithMe ?? remoteItem.isMatchedWithMe,
+                likes: Math.max(remoteItem.likes || 0, existing?.likes || 0),
+              };
+            });
             const remoteIds = new Set(remoteItems.map((r) => r.id));
             const retained = prev.filter((p) => !remoteIds.has(p.id));
-            return [...remoteItems, ...retained];
+            return [...mergedRemote, ...retained];
           });
         }
       });
@@ -165,10 +238,46 @@ export default function Home() {
 
     return () => {
       isMounted = false;
-      clearInterval(pollInterval);
+      if (pollInterval) clearInterval(pollInterval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
       unsubscribeSupabase();
     };
   }, []);
+
+  // 3. Synchronize Current User with River Krathong Ownership
+  useEffect(() => {
+    if (!currentUser) {
+      // User logged out: clear pinned krathong
+      setMyKrathongId(null);
+      try {
+        localStorage.removeItem('loy_krathong_my_id');
+        localStorage.removeItem('loy_krathong_my_item');
+      } catch {}
+      return;
+    }
+
+    // User is logged in: find their krathong in the river
+    const userCleanNick = currentUser.nickname.trim().toLowerCase();
+    const userCleanUsername = currentUser.username.trim().toLowerCase();
+
+    const userKrathong = riverKrathongs.find((k) => {
+      if (k.userId && k.userId === currentUser.id) return true;
+      const kName = k.name.trim().toLowerCase();
+      return kName === userCleanNick || kName === userCleanUsername;
+    });
+
+    if (userKrathong) {
+      if (myKrathongId !== userKrathong.id) {
+        setMyKrathongId(userKrathong.id);
+        try {
+          localStorage.setItem('loy_krathong_my_id', userKrathong.id);
+          localStorage.setItem('loy_krathong_my_item', JSON.stringify(userKrathong));
+        } catch {}
+      }
+    }
+  }, [currentUser, riverKrathongs, myKrathongId]);
 
   // Single Data
   const [singleProfile, setSingleProfile] = useState<SingleProfile | undefined>(undefined);
@@ -315,6 +424,7 @@ export default function Home() {
     setSelectedMode('single');
 
     // Automatically synchronize user profile with AuthContext
+    let activeUserId = currentUser?.id;
     if (isLoggedIn && currentUser) {
       updateProfile({
         nickname: profile.nickname,
@@ -331,7 +441,7 @@ export default function Home() {
       const cleanUser =
         profile.nickname.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
         `user_${Date.now().toString().slice(-4)}`;
-      register({
+      const registered = register({
         username: cleanUser,
         nickname: profile.nickname,
         avatarUrl: profile.avatarUrl || PRESET_AVATARS[0].url,
@@ -343,9 +453,11 @@ export default function Home() {
         allowContact: profile.allowContact,
         bio: profile.wish || '',
       });
+      activeUserId = registered.id;
     }
 
     // Save user's own Krathong ID and full item
+    const oldId = myKrathongId;
     setMyKrathongId(profile.id);
 
     // Add user's new Krathong to the live river
@@ -364,7 +476,7 @@ export default function Home() {
       delay: 0,
       contacts: profile.contacts,
       allowContact: profile.allowContact,
-      userId: currentUser?.id || profile.id,
+      userId: activeUserId || profile.id,
       gender: profile.gender,
       targetGender: profile.targetGender,
       rawZodiac: profile.zodiac,
@@ -377,14 +489,18 @@ export default function Home() {
       localStorage.setItem('loy_krathong_my_item', JSON.stringify(newRiverItem));
     } catch {}
 
-    setRiverKrathongs((prev) => [newRiverItem, ...prev]);
+    // 1 user can float only 1 krathong: replace any previous krathong
+    setRiverKrathongs((prev) => [
+      newRiverItem,
+      ...prev.filter((k) => k.id !== oldId && k.id !== profile.id),
+    ]);
 
     // Send Krathong to PostgreSQL backend
-    insertApiKrathong(newRiverItem, currentUser?.id);
+    insertApiKrathong(newRiverItem, activeUserId);
 
     // Send Krathong to Supabase Realtime if configured
     if (isSupabaseConfigured()) {
-      insertRemoteKrathong(newRiverItem, currentUser?.id);
+      insertRemoteKrathong(newRiverItem, activeUserId);
     }
 
     setView('river');
@@ -396,6 +512,7 @@ export default function Home() {
     setSelectedMode('couple');
 
     // Automatically synchronize couple user with AuthContext
+    let activeUserId = currentUser?.id;
     if (isLoggedIn && currentUser) {
       updateProfile({
         nickname: profile.partner1Name,
@@ -406,7 +523,7 @@ export default function Home() {
       const cleanUser =
         profile.partner1Name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
         `user_${Date.now().toString().slice(-4)}`;
-      register({
+      const registered = register({
         username: cleanUser,
         nickname: profile.partner1Name,
         avatarUrl: profile.partner1Avatar || PRESET_AVATARS[0].url,
@@ -417,9 +534,11 @@ export default function Home() {
         allowContact: false,
         bio: profile.loveMessage || '',
       });
+      activeUserId = registered.id;
     }
 
     // Save user's own Krathong ID and full item
+    const oldId = myKrathongId;
     setMyKrathongId(profile.id);
 
     // Add couple's new Krathong to the live river
@@ -435,6 +554,8 @@ export default function Home() {
       lane: 4,
       speed: 27,
       delay: 0,
+      roomCode: profile.roomCode,
+      userId: activeUserId || profile.id,
     };
 
     try {
@@ -442,14 +563,18 @@ export default function Home() {
       localStorage.setItem('loy_krathong_my_item', JSON.stringify(newRiverItem));
     } catch {}
 
-    setRiverKrathongs((prev) => [newRiverItem, ...prev]);
+    // 1 user can float only 1 krathong: replace any previous krathong
+    setRiverKrathongs((prev) => [
+      newRiverItem,
+      ...prev.filter((k) => k.id !== oldId && k.id !== profile.id),
+    ]);
 
     // Send Krathong to PostgreSQL backend
-    insertApiKrathong(newRiverItem, currentUser?.id);
+    insertApiKrathong(newRiverItem, activeUserId);
 
     // Send Krathong to Supabase Realtime if configured
     if (isSupabaseConfigured()) {
-      insertRemoteKrathong(newRiverItem, currentUser?.id);
+      insertRemoteKrathong(newRiverItem, activeUserId);
     }
 
     setView('river');
@@ -461,6 +586,7 @@ export default function Home() {
     setSelectedMode('family');
 
     // Automatically synchronize family user with AuthContext
+    let activeUserId = currentUser?.id;
     if (isLoggedIn && currentUser) {
       updateProfile({
         nickname: profile.familyName,
@@ -471,7 +597,7 @@ export default function Home() {
       const cleanUser =
         profile.familyName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '') ||
         `fam_${Date.now().toString().slice(-4)}`;
-      register({
+      const registered = register({
         username: cleanUser,
         nickname: profile.familyName,
         avatarUrl: profile.avatarUrl || PRESET_AVATARS[1].url,
@@ -482,9 +608,11 @@ export default function Home() {
         allowContact: false,
         bio: profile.familyWish || '',
       });
+      activeUserId = registered.id;
     }
 
     // Save user's own Krathong ID and full item
+    const oldId = myKrathongId;
     setMyKrathongId(profile.id);
 
     // Add family's new Krathong to the live river
@@ -501,6 +629,7 @@ export default function Home() {
       lane: 2,
       speed: 26,
       delay: 0,
+      userId: activeUserId || profile.id,
     };
 
     try {
@@ -508,17 +637,27 @@ export default function Home() {
       localStorage.setItem('loy_krathong_my_item', JSON.stringify(newRiverItem));
     } catch {}
 
-    setRiverKrathongs((prev) => [newRiverItem, ...prev]);
+    // 1 user can float only 1 krathong: replace any previous krathong
+    setRiverKrathongs((prev) => [
+      newRiverItem,
+      ...prev.filter((k) => k.id !== oldId && k.id !== profile.id),
+    ]);
 
     // Send Krathong to PostgreSQL backend
-    insertApiKrathong(newRiverItem, currentUser?.id);
+    insertApiKrathong(newRiverItem, activeUserId);
 
     // Send Krathong to Supabase Realtime if configured
     if (isSupabaseConfigured()) {
-      insertRemoteKrathong(newRiverItem, currentUser?.id);
+      insertRemoteKrathong(newRiverItem, activeUserId);
     }
 
     setView('river');
+  };
+
+  // Navigate directly to River Map without resetting profile
+  const handleGoToRiver = () => {
+    setShowResultModal(false);
+    setView('landing');
   };
 
   // Handle Restart / Back to Main Landing
@@ -549,7 +688,7 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsGalleryOpen(true)}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 border border-amber-500/40 text-amber-200 px-3 py-2 rounded-2xl text-xs font-bold shadow-md transition transform hover:scale-102"
+              className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 hover:from-amber-500/30 hover:to-yellow-500/30 border border-amber-500/40 text-amber-200 px-3 py-2 rounded-2xl text-xs font-bold shadow-md transition transform hover:scale-102 cursor-pointer"
               title="ส่องกระทงและคำอธิษฐานของทุกคน"
             >
               <span>📜</span>
@@ -557,6 +696,20 @@ export default function Home() {
               <span className="bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold">
                 {riverKrathongs.length}
               </span>
+            </button>
+
+            {/* How to Float Guide Button */}
+            <button
+              onClick={() => {
+                setHowToFloatTab('single');
+                setIsHowToFloatOpen(true);
+              }}
+              className="flex items-center gap-1.5 bg-gradient-to-r from-pink-500/15 via-rose-500/15 to-amber-500/15 hover:from-pink-500/25 hover:to-amber-500/25 border border-pink-500/30 text-amber-200 px-3 py-2 rounded-2xl text-xs font-bold shadow-md transition transform hover:scale-102 cursor-pointer"
+              title="แนะนำวิธีการลอยกระทงแบบต่างๆ"
+            >
+              <span>💡</span>
+              <span className="hidden sm:inline">วิธีลอยกระทง</span>
+              <span className="sm:hidden">วิธีลอย</span>
             </button>
 
             {isDbConnected ? (
@@ -637,20 +790,31 @@ export default function Home() {
           <InteractiveRiverMap
             krathongs={riverKrathongs}
             myKrathongId={myKrathongId}
+            onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            onOpenHowToFloat={() => {
+              setHowToFloatTab('single');
+              setIsHowToFloatOpen(true);
+            }}
             onFloatSingleAtPier={(pier) => {
-              setSelectedPier(pier);
-              setSelectedMode('single');
-              setView('single_form');
+              checkCanFloat(() => {
+                setSelectedPier(pier);
+                setSelectedMode('single');
+                setView('single_form');
+              });
             }}
             onFloatCoupleAtPier={(pier) => {
-              setSelectedPier(pier);
-              setSelectedMode('couple');
-              setView('couple_form');
+              checkCanFloat(() => {
+                setSelectedPier(pier);
+                setSelectedMode('couple');
+                setView('couple_form');
+              });
             }}
             onFloatFamilyAtPier={(pier) => {
-              setSelectedPier(pier);
-              setSelectedMode('family');
-              setView('family_form');
+              checkCanFloat(() => {
+                setSelectedPier(pier);
+                setSelectedMode('family');
+                setView('family_form');
+              });
             }}
             onSelectKrathong={(k) => setInspectingKrathong(k)}
           />
@@ -688,6 +852,7 @@ export default function Home() {
             <CoupleFlow
               onComplete={handleCoupleComplete}
               onBack={() => setView('landing')}
+              initialRoomCode={initialCoupleRoomCode}
             />
           </div>
         )}
@@ -734,6 +899,7 @@ export default function Home() {
           familyData={familyProfile}
           matchResult={matchResult}
           onRestart={handleRestart}
+          onGoToRiver={handleGoToRiver}
         />
       )}
 
@@ -741,6 +907,13 @@ export default function Home() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        myKrathong={riverKrathongs.find((k) => k.id === myKrathongId) || null}
+        onViewMyKrathong={() => {
+          const myItem = riverKrathongs.find((k) => k.id === myKrathongId);
+          if (myItem) {
+            setInspectingKrathong(myItem);
+          }
+        }}
       />
 
       {/* Krathong Gallery Modal */}
@@ -751,6 +924,35 @@ export default function Home() {
         myKrathongId={myKrathongId}
         onSelectKrathong={(k) => setInspectingKrathong(k)}
         onLikeKrathong={handleLikeKrathong}
+      />
+
+      {/* How to Float Guide Modal */}
+      <HowToFloatModal
+        isOpen={isHowToFloatOpen}
+        onClose={() => setIsHowToFloatOpen(false)}
+        initialTab={howToFloatTab}
+        onStartSingle={() => {
+          checkCanFloat(() => {
+            setSelectedPier(FESTIVAL_PIERS[0]);
+            setSelectedMode('single');
+            setView('single_form');
+          });
+        }}
+        onStartCouple={() => {
+          checkCanFloat(() => {
+            setSelectedPier(FESTIVAL_PIERS[0]);
+            setSelectedMode('couple');
+            setView('couple_form');
+          });
+        }}
+        onStartFamily={() => {
+          checkCanFloat(() => {
+            setSelectedPier(FESTIVAL_PIERS[0]);
+            setSelectedMode('family');
+            setView('family_form');
+          });
+        }}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
       />
 
       {/* Inspect Krathong Popup (When clicked on the Big Map) */}

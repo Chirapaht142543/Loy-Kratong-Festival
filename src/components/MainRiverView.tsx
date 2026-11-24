@@ -12,39 +12,13 @@ import {
   ZodiacSign,
   DayOfWeek,
   ElementType,
+  RiverKrathongItem,
 } from '@/types/krathong';
 import { Krathong2D } from './Krathong2D';
 import { ZODIAC_INFO, ELEMENT_THAI } from '@/lib/astrology';
 import { Sparkles, Heart, Flame, MessageCircle, X } from 'lucide-react';
 
-export interface RiverKrathongItem {
-  id: string;
-  mode: 'single' | 'couple' | 'family';
-  name: string;
-  partnerName?: string;
-  familyName?: string;
-  familyMembers?: FamilyMember[] | string[];
-  design: KrathongDesign;
-  wish: string;
-  zodiac?: string;
-  element?: string;
-  avatarUrl?: string;
-  likes: number;
-  // Animation positioning
-  lane: number; // 0 to 4 (depth)
-  speed: number; // animation duration in seconds
-  delay: number; // initial delay
-  // Mutual Match & Contact Channel info
-  contacts?: SocialContacts;
-  allowContact?: boolean;
-  userId?: string;
-  gender?: Gender;
-  targetGender?: TargetGender;
-  rawZodiac?: ZodiacSign;
-  rawBirthDay?: DayOfWeek;
-  rawElement?: ElementType;
-  isMatchedWithMe?: boolean;
-}
+export type { RiverKrathongItem };
 
 interface MainRiverViewProps {
   krathongs: RiverKrathongItem[];

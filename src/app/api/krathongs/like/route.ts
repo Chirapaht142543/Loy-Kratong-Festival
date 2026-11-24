@@ -2,10 +2,6 @@ import { NextResponse } from 'next/server';
 import { incrementDbLikes, isPostgresConfigured } from '@/lib/db';
 
 export async function POST(req: Request) {
-  if (!isPostgresConfigured()) {
-    return NextResponse.json({ configured: false, success: false });
-  }
-
   try {
     const { id } = await req.json();
     if (!id) {
@@ -13,7 +9,7 @@ export async function POST(req: Request) {
     }
 
     const newLikes = await incrementDbLikes(id);
-    return NextResponse.json({ success: newLikes !== null, likes: newLikes, configured: true });
+    return NextResponse.json({ success: newLikes !== null, likes: newLikes, configured: isPostgresConfigured() });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -56,6 +56,22 @@ export interface CoupleProfile {
   anniversaryDate?: string;
   design: KrathongDesign;
   createdAt: string;
+  roomCode?: string;
+}
+
+export interface CoupleRoom {
+  code: string; // เช่น CP-7842
+  status: 'waiting' | 'ready' | 'floated';
+  hostName: string;
+  hostAvatar?: string;
+  hostWish: string;
+  partnerName?: string;
+  partnerAvatar?: string;
+  partnerWish?: string;
+  design: KrathongDesign;
+  krathongId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface FamilyMember {
@@ -104,4 +120,34 @@ export interface MutualMatch {
   harmonyScore: number;
   harmonyTitle: string;
   matchedAt: string;
+}
+
+export interface RiverKrathongItem {
+  id: string;
+  mode: 'single' | 'couple' | 'family';
+  name: string;
+  partnerName?: string;
+  familyName?: string;
+  familyMembers?: FamilyMember[] | string[];
+  design: KrathongDesign;
+  wish: string;
+  zodiac?: string;
+  element?: string;
+  avatarUrl?: string;
+  likes: number;
+  // Positioning along river
+  lane: number;
+  speed: number;
+  delay: number;
+  // Contact and Astrology data
+  contacts?: SocialContacts;
+  allowContact?: boolean;
+  userId?: string;
+  gender?: Gender;
+  targetGender?: TargetGender;
+  rawZodiac?: ZodiacSign;
+  rawBirthDay?: DayOfWeek;
+  rawElement?: ElementType;
+  isMatchedWithMe?: boolean;
+  roomCode?: string;
 }
