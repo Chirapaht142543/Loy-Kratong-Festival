@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { SingleProfile, CoupleProfile, FamilyProfile, MatchResult } from '@/types/krathong';
 import { findBestAstrologyMatch, ZODIAC_INFO, ELEMENT_THAI, getElementCompatibility } from '@/lib/astrology';
-import { INITIAL_SINGLE_POOL } from '@/lib/mockData';
 import { RiverKrathongItem } from '@/components/MainRiverView';
 import { InteractiveRiverMap } from '@/components/InteractiveRiverMap';
 import { PierLocation, FESTIVAL_PIERS } from '@/types/map';
@@ -37,210 +36,9 @@ import { User, LogIn, X, Heart, ExternalLink, Copy, Check, Flame } from 'lucide-
 
 type AppView = 'landing' | 'single_form' | 'couple_form' | 'family_form' | 'river';
 
-// Generate Initial River Krathongs from single pool and sample couples
+// Initial River Krathongs (starts clean; dynamically loaded from Database / local storage)
 const createInitialRiverKrathongs = (): RiverKrathongItem[] => {
-  const items: RiverKrathongItem[] = [];
-
-  // Single Krathongs
-  INITIAL_SINGLE_POOL.forEach((p, idx) => {
-    items.push({
-      id: p.id,
-      mode: 'single',
-      name: p.nickname,
-      design: p.design,
-      wish: p.wish,
-      zodiac: `${ZODIAC_INFO[p.zodiac].thai} (${ELEMENT_THAI[p.element].name})`,
-      element: ELEMENT_THAI[p.element].name,
-      avatarUrl: p.avatarUrl,
-      likes: ((idx * 7) % 25) + 5,
-      lane: idx % 5,
-      speed: 24 + (idx % 4) * 5, // 24s to 39s
-      delay: (idx * 4.2) % 28,
-      contacts: p.contacts,
-      allowContact: p.allowContact,
-      userId: p.id,
-      gender: p.gender,
-      targetGender: p.targetGender,
-      rawZodiac: p.zodiac,
-      rawBirthDay: p.birthDay,
-      rawElement: p.element,
-    });
-  });
-
-  // Sample Couple Krathongs
-  const sampleCouples = [
-    {
-      id: 'cpl-init-1',
-      name: 'กอล์ฟ',
-      partnerName: 'แพรว',
-      wish: 'ขอให้ความรักของเรา 5 ปีนี้มีแต่รอยยิ้ม และก้าวผ่านทุกอย่างไปด้วยกันนะ 💕',
-      design: { base: 'lotus' as const, flower: 'rose' as const, candle: 'pink-love' as const },
-      lane: 1,
-      speed: 28,
-      delay: 5,
-      likes: 24,
-    },
-    {
-      id: 'cpl-init-2',
-      name: 'โอ๊ต',
-      partnerName: 'เบลล์',
-      wish: 'ขอบคุณที่คอยซัพพอร์ตกันเสมอ ขอให้ปีนี้เราได้ไปเที่ยวญี่ปุ่นด้วยกันสำเร็จนะ ✈️',
-      design: { base: 'banana-leaf' as const, flower: 'marigold' as const, candle: 'pink-love' as const },
-      lane: 3,
-      speed: 32,
-      delay: 17,
-      likes: 31,
-    },
-    {
-      id: 'cpl-init-3',
-      name: 'นนท์',
-      partnerName: 'มายด์',
-      wish: 'ขอให้ครอบครัวของเราอบอุ่น สุขภาพแข็งแรง และรักกันตลอดไป ❤️',
-      design: { base: 'bread' as const, flower: 'mixed' as const, candle: 'pink-love' as const },
-      lane: 4,
-      speed: 26,
-      delay: 22,
-      likes: 19,
-    },
-    {
-      id: 'cpl-init-4',
-      name: 'เจมส์',
-      partnerName: 'พิมพ์',
-      wish: 'ลอยกระทงปีแรกด้วยกัน ขอให้อยู่เคียงข้างกันในทุกๆ ปีตลอดไปนะ 🌸💫',
-      design: { base: 'lotus' as const, flower: 'orchid' as const, candle: 'pink-love' as const },
-      lane: 2,
-      speed: 29,
-      delay: 12,
-      likes: 28,
-    },
-    {
-      id: 'cpl-init-5',
-      name: 'อาร์ท',
-      partnerName: 'นุ่น',
-      wish: 'ขอให้ร้านกาแฟของเราสองคนขายดี มีลูกค้าประจำ และรักกันไม่เสื่อมคลาย ☕✨',
-      design: { base: 'coconut' as const, flower: 'marigold' as const, candle: 'pink-love' as const },
-      lane: 0,
-      speed: 31,
-      delay: 8,
-      likes: 35,
-    },
-  ];
-
-  // Additional Community Single Blessings
-  const additionalSingles = [
-    {
-      id: 'sg-add-1',
-      name: 'ฟ้าใส',
-      wish: 'ขอให้งานโปรเจกต์ผ่านฉลุย ได้เลื่อนตำแหน่ง และได้พบคนที่เข้ากันได้เร็วๆ นี้ 🌟',
-      design: { base: 'lotus' as const, flower: 'orchid' as const, candle: 'scented' as const },
-      zodiac: 'เมษ (ไฟ)',
-      likes: 42,
-    },
-    {
-      id: 'sg-add-2',
-      name: 'เต้',
-      wish: 'ขอให้สุขภาพร่างกายแข็งแรง วิ่งมาราธอนจบ sub 4 สำเร็จในปีหน้าครับ 🏃‍♂️',
-      design: { base: 'banana-leaf' as const, flower: 'mixed' as const, candle: 'classic' as const },
-      zodiac: 'พิจิก (น้ำ)',
-      likes: 18,
-    },
-    {
-      id: 'sg-add-3',
-      name: 'น้ำหวาน',
-      wish: 'ขอให้หัวใจได้รับการเยียวยา พบเจอแต่กัลยาณมิตรและความสุขที่เรียบง่าย 💖',
-      design: { base: 'bread' as const, flower: 'rose' as const, candle: 'pink-love' as const },
-      zodiac: 'พฤษภ (ดิน)',
-      likes: 27,
-    },
-  ];
-
-  additionalSingles.forEach((s, idx) => {
-    items.push({
-      id: s.id,
-      mode: 'single',
-      name: s.name,
-      design: s.design,
-      wish: s.wish,
-      zodiac: s.zodiac,
-      likes: s.likes,
-      lane: (idx + 2) % 5,
-      speed: 27,
-      delay: idx * 6,
-    });
-  });
-
-  sampleCouples.forEach((c) => {
-    items.push({
-      id: c.id,
-      mode: 'couple',
-      name: c.name,
-      partnerName: c.partnerName,
-      design: c.design,
-      wish: c.wish,
-      likes: c.likes,
-      lane: c.lane,
-      speed: c.speed,
-      delay: c.delay,
-    });
-  });
-
-  // Sample Family Krathongs
-  const sampleFamilies = [
-    {
-      id: 'fam-init-1',
-      name: 'ครอบครัววิริยะกุล & เจ้าส้ม',
-      familyName: 'ครอบครัววิริยะกุล & เจ้าส้ม',
-      familyMembers: [
-        { id: 'm1', name: 'คุณพ่อกานต์', role: 'คุณพ่อ', isPet: false },
-        { id: 'm2', name: 'คุณแม่วรรณ', role: 'คุณแม่', isPet: false },
-        { id: 'm3', name: 'น้องมีนา', role: 'ลูกสาว', isPet: false },
-        { id: 'm4', name: 'เจ้าส้ม 🐱', role: 'น้องแมว 🐱', isPet: true },
-      ],
-      wish: 'ขอให้ครอบครัวและน้องแมวส้มของเราสุขภาพแข็งแรง ร่มเย็นเป็นสุข ปลอดภัยตลอดไป 🏡🐾✨',
-      design: { base: 'banana-leaf' as const, flower: 'mixed' as const, candle: 'classic' as const },
-      lane: 2,
-      speed: 26,
-      delay: 4,
-      likes: 48,
-    },
-    {
-      id: 'fam-init-2',
-      name: 'บ้านสุขสันต์เปี่ยมบุญ',
-      familyName: 'บ้านสุขสันต์เปี่ยมบุญ',
-      familyMembers: [
-        { id: 'm1', name: 'คุณปู่สมศักดิ์', role: 'คุณปู่/ตา', isPet: false },
-        { id: 'm2', name: 'คุณย่าสมศรี', role: 'คุณย่า/ยาย', isPet: false },
-        { id: 'm3', name: 'พ่อเอก', role: 'คุณพ่อ', isPet: false },
-        { id: 'm4', name: 'แม่นิ่ม', role: 'คุณแม่', isPet: false },
-        { id: 'm5', name: 'น้องปั๊บ', role: 'ลูกชาย', isPet: false },
-        { id: 'm6', name: 'ถั่วต้ม 🐶', role: 'น้องหมา 🐶', isPet: true },
-      ],
-      wish: 'ขอขมาพระแม่คงคา และขอให้คนในครอบครัวรวมทั้งน้องหมาถั่วต้มเจริญรุ่งเรือง ปลอดภัยจากโรคภัยทั้งปวง 🙏🌟',
-      design: { base: 'lotus' as const, flower: 'marigold' as const, candle: 'scented' as const },
-      lane: 0,
-      speed: 30,
-      delay: 14,
-      likes: 56,
-    },
-  ];
-
-  sampleFamilies.forEach((f) => {
-    items.push({
-      id: f.id,
-      mode: 'family',
-      name: f.name,
-      familyName: f.familyName,
-      familyMembers: f.familyMembers,
-      design: f.design,
-      wish: f.wish,
-      likes: f.likes,
-      lane: f.lane,
-      speed: f.speed,
-      delay: f.delay,
-    });
-  });
-
-  return items;
+  return [];
 };
 
 export default function Home() {
@@ -484,7 +282,35 @@ export default function Home() {
   // Handle Single Flow Completed
   const handleSingleComplete = (profile: SingleProfile) => {
     setSingleProfile(profile);
-    const match = findBestAstrologyMatch(profile, INITIAL_SINGLE_POOL);
+
+    // Find candidates from existing single krathongs in the river (excluding current user)
+    const riverCandidates: SingleProfile[] = riverKrathongs
+      .filter(
+        (k) =>
+          k.mode === 'single' &&
+          k.id !== profile.id &&
+          k.rawZodiac &&
+          k.rawBirthDay &&
+          k.rawElement
+      )
+      .map((k) => ({
+        id: k.id,
+        mode: 'single',
+        nickname: k.name,
+        gender: k.gender || 'female',
+        targetGender: k.targetGender || 'any',
+        birthDay: k.rawBirthDay!,
+        zodiac: k.rawZodiac!,
+        element: k.rawElement!,
+        contacts: k.contacts || {},
+        allowContact: k.allowContact ?? true,
+        avatarUrl: k.avatarUrl,
+        wish: k.wish,
+        design: k.design,
+        createdAt: new Date().toISOString(),
+      }));
+
+    const match = findBestAstrologyMatch(profile, riverCandidates);
     setMatchResult(match);
     setSelectedMode('single');
 

@@ -243,6 +243,74 @@ export const ResultCardModal: React.FC<ResultCardModalProps> = ({
           </div>
         )}
 
+        {/* 1.1 SINGLE RESULT CARD (AWAITING MATCH / FLOATED) */}
+        {mode === 'single' && singleData && !matchResult && (
+          <div className="space-y-6 text-center">
+            <div className="inline-flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-rose-500 text-slate-950 px-4 py-1.5 rounded-full text-xs font-extrabold shadow-lg shadow-amber-500/20">
+              <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+              กระทงสายเดี่ยวลอยสู่สายน้ำแล้ว ✨
+            </div>
+
+            <div className="py-2">
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-amber-200">
+                {singleData.nickname}
+              </h2>
+              <p className="text-xs text-amber-400 mt-1">
+                {DAY_THAI[singleData.birthDay]} • {ZODIAC_INFO[singleData.zodiac].thai} ({ELEMENT_THAI[singleData.element].name})
+              </p>
+            </div>
+
+            {/* Krathong Preview */}
+            <div className="bg-slate-800/50 border border-slate-700/70 rounded-2xl p-4 flex items-center justify-center">
+              <div className="transform scale-90 -my-2">
+                <Krathong2D
+                  design={singleData.design}
+                  size={160}
+                  name={singleData.nickname}
+                />
+              </div>
+            </div>
+
+            {/* Wish Message */}
+            <div className="bg-slate-950/70 border border-amber-500/30 p-4 rounded-2xl text-xs sm:text-sm text-amber-100 italic leading-relaxed">
+              &ldquo;{singleData.wish}&rdquo;
+            </div>
+
+            {/* Elemental Fortune */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 text-left">
+              <div className="font-bold text-amber-300 mb-1 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                คำทำนายดวงชะตา ({ELEMENT_THAI[singleData.element].name}):
+              </div>
+              <p className="leading-relaxed">
+                {ELEMENT_THAI[singleData.element].desc} ขอให้ปีนี้ความรักและกัลยาณมิตรที่ดีหลั่งไหลเข้ามาดั่งสายน้ำ
+              </p>
+            </div>
+
+            {/* Status note */}
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300/90 leading-relaxed">
+              กระทงของคุณกำลังลอยในแม่น้ำ หากมีผู้ลอยกระทงท่านอื่นที่มีดวงสมพงษ์เข้ากัน ระบบจะส่งหัวใจและแจ้งเตือนให้คุณทราบ!
+            </div>
+
+            {/* Tags */}
+            <div className="flex flex-wrap gap-1.5 justify-center">
+              {[
+                `#${ELEMENT_THAI[singleData.element].name}`,
+                `#${ZODIAC_INFO[singleData.zodiac].thai}`,
+                '#คนโสดเสน่ห์แรง',
+                '#ลอยกระทง๒๕๖๙',
+              ].map((tag, idx) => (
+                <span
+                  key={idx}
+                  className="bg-slate-800/90 text-amber-300/80 border border-amber-500/20 text-[10px] px-2.5 py-1 rounded-full font-medium"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 2. COUPLE RESULT CARD */}
         {mode === 'couple' && coupleData && (
           <div className="space-y-6 text-center">

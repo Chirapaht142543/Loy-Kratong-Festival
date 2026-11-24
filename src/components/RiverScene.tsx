@@ -29,40 +29,71 @@ export const RiverScene: React.FC<RiverSceneProps> = ({
 
   useEffect(() => {
     if (mode === 'single') {
-      // 1. Initial drift (0s - 2.5s)
-      const t1 = setTimeout(() => {
-        setPhase('seeking');
-        setStatusMessage('สายน้ำกำลังนำพาหาคนที่มีดวงชะตาสมพงษ์...');
-      }, 2000);
+      if (matchResult) {
+        // 1. Initial drift (0s - 2.5s)
+        const t1 = setTimeout(() => {
+          setPhase('seeking');
+          setStatusMessage('สายน้ำกำลังนำพาหาคนที่มีดวงชะตาสมพงษ์...');
+        }, 2000);
 
-      // 2. Candidate arrives & Collide (2.5s - 4.8s)
-      const t2 = setTimeout(() => {
-        setPhase('matched');
-        setStatusMessage('✨ พบกระทงดวงชะตาต้องกันแล้ว!');
+        // 2. Candidate arrives & Collide (2.5s - 4.8s)
+        const t2 = setTimeout(() => {
+          setPhase('matched');
+          setStatusMessage('✨ พบกระทงดวงชะตาต้องกันแล้ว!');
 
-        // Trigger celebratory confetti fireworks
-        if (!confettiTriggeredRef.current) {
-          confettiTriggeredRef.current = true;
-          confetti({
-            particleCount: 80,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ['#F59E0B', '#EC4899', '#38BDF8', '#FDE047'],
-          });
-        }
-      }, 4500);
+          // Trigger celebratory confetti fireworks
+          if (!confettiTriggeredRef.current) {
+            confettiTriggeredRef.current = true;
+            confetti({
+              particleCount: 80,
+              spread: 70,
+              origin: { y: 0.6 },
+              colors: ['#F59E0B', '#EC4899', '#38BDF8', '#FDE047'],
+            });
+          }
+        }, 4500);
 
-      // 3. Open Result Modal (6.2s)
-      const t3 = setTimeout(() => {
-        setPhase('ready');
-        onRevealResult();
-      }, 6200);
+        // 3. Open Result Modal (6.2s)
+        const t3 = setTimeout(() => {
+          setPhase('ready');
+          onRevealResult();
+        }, 6200);
 
-      return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
-        clearTimeout(t3);
-      };
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(t2);
+          clearTimeout(t3);
+        };
+      } else {
+        // Single mode without matched candidate yet
+        const t1 = setTimeout(() => {
+          setStatusMessage('กระทงของคุณกำลังล่องลอยนำพาความปรารถนาสู่สายน้ำ...');
+        }, 2000);
+
+        const t2 = setTimeout(() => {
+          setPhase('ready');
+          setStatusMessage('✨ ลอยกระทงสำเร็จ ขอให้สมหวังดั่งใจปรารถนา!');
+          if (!confettiTriggeredRef.current) {
+            confettiTriggeredRef.current = true;
+            confetti({
+              particleCount: 60,
+              spread: 60,
+              origin: { y: 0.6 },
+              colors: ['#F59E0B', '#38BDF8', '#FDE047'],
+            });
+          }
+        }, 4500);
+
+        const t3 = setTimeout(() => {
+          onRevealResult();
+        }, 6000);
+
+        return () => {
+          clearTimeout(t1);
+          clearTimeout(t2);
+          clearTimeout(t3);
+        };
+      }
     } else if (mode === 'family') {
       // Family Mode
       const t1 = setTimeout(() => {
@@ -251,7 +282,7 @@ export const RiverScene: React.FC<RiverSceneProps> = ({
             )}
 
             {/* Collision Sparkles & Heart Aura */}
-            {(phase === 'matched' || phase === 'ready') && (
+            {(phase === 'matched' || phase === 'ready') && matchResult && (
               <div className="absolute bottom-[35%] flex items-center justify-center pointer-events-none animate-ping">
                 <div className="w-40 h-40 rounded-full bg-pink-500/20 blur-xl" />
                 <Heart className="w-10 h-10 text-pink-400 fill-pink-400" />

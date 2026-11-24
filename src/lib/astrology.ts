@@ -119,9 +119,17 @@ export function isGenderCompatible(
 export function findBestAstrologyMatch(
   user: SingleProfile,
   candidates: SingleProfile[]
-): MatchResult {
+): MatchResult | null {
+  if (!candidates || candidates.length === 0) {
+    return null;
+  }
+
   // 1. Filter out candidate matching user's ID
   let eligible = candidates.filter((c) => c.id !== user.id);
+
+  if (eligible.length === 0) {
+    return null;
+  }
 
   // 2. Filter by gender preference
   const genderMatched = eligible.filter((c) =>
@@ -130,11 +138,6 @@ export function findBestAstrologyMatch(
 
   if (genderMatched.length > 0) {
     eligible = genderMatched;
-  }
-
-  // Fallback if empty
-  if (eligible.length === 0) {
-    eligible = candidates;
   }
 
   // 3. Score each candidate
